@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}{{ pillar_name }} — {{ dept.name }} — JSPL TPM Portal{% endblock %}
+
+{% block breadcrumb %}
+  {% if request.user.is_admin %}
+    <a href="{% url 'plant_dashboard' %}">Plant Dashboard</a>
+  {% endif %}
+  <a href="{% url 'dept_overview' dept.id %}">{{ dept.name }}</a>
+  <span>{{ pillar_id }} Pillar</span>
+{% endblock %}
+
+{% block content %}
+  <div style="background-color: var(--jspl-white); border: 1px solid var(--jspl-border); border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow-sm); margin-bottom: 24px;">
+    
+    <!-- Title and Filter Row -->
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--jspl-border); padding-bottom: 16px; margin-bottom: 20px;">
+      <div>
+        <h2 style="color: var(--jspl-navy);">📁 {{ pillar_name }} ({{ pillar_id }})</h2>
+        <span style="font-size: 0.85rem; color: var(--jspl-muted);">Department: <b>{{ dept.name }}</b></span>
+      </div>
+      
+      <!-- Filters (HTMX enabled, updates month/year state in the views) -->
+      <div>
+        <form id="filter-form" style="display: flex; gap: 10px; align-items: center;">
+          <input type="hidden" name="tab" id="active-tab-input" value="entry">
+          
+          <div style="display: flex; flex-direction: column;">
+            <label style="font-size: 0.75rem; font-weight: bold; color: var(--jspl-muted); margin-bottom: 2px;">Month</label>
+            <select name="month" class="input-mono" style="width: 140px;"
+                    hx-get="{% url 'kpi_table_partial' dept.id pillar_id %}"
+                    hx-target="#kpi-table-container"
+                    hx-trigger="change"
+                    hx-include="#filter-form"
+                    @change="if(activeTab === 'analytics') { htmx.trigger('#btn-analytics', 'click'); }">
+              {% for m_id, m_name in months %}
+                <option value="{{ m_id }}" {% if m_id == month %}selected{% endif %}>{{ m_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          
+          <div style="display: flex; flex-direction: column;">
+            <label style="font-size: 0.75rem; font-weight: bold; color: var(--jspl-muted); margin-bottom: 2px;">Year</label>
+            <select name="year" class="input-mono" style="width: 100px;"
+                    hx-get="{% url 'kpi_table_partial' dept.id pillar_id %}"
+                    hx-target="#kpi-table-container"
+                    hx-trigger="change"
+                    hx-include="#filter-form"
+                    @change="if(activeTab === 'analytics') { htmx.trigger('#btn-analytics', 'click'); }">
+              {% for y in years %}
+                <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          
+          <!-- Standard Form submits fallback -->
+          <noscript>
+            <button type="submit" class="btn btn-secondary" style="margin-top: 14px;">Filter</button>
+          </noscript>
+        </form>
+      </div>
+    </div>
+
+    <!-- TABS CONTROLLER (Alpine.js + HTMX) -->
+    <div x-data="{ activeTab: 'entry' }">
+      <div class="tab-container">
+        <button class="tab-btn" :class="{ 'active': activeTab === 'entry' }"
+                hx-get="{% url 'kpi_table_partial' dept.id pillar_id %}"
+                hx-target="#tab-content"
+                hx-include="#filter-form"
+                hx-swap="innerHTML"
+                @click="activeTab = 'entry'; document.getElementById('active-tab-input').value = 'entry';">
+          📝 Data Entry Tab
+        </button>
+        <button class="tab-btn" id="btn-analytics" :class="{ 'active': activeTab === 'analytics' }"
+                hx-get="{% url 'analytics_partial' dept.id pillar_id %}"
+                hx-target="#tab-content"
+                hx-include="#filter-form"
+                hx-swap="innerHTML"
+                @click="activeTab = 'analytics'; document.getElementById('active-tab-input').value = 'analytics';">
+          📊 Analytics Tab
+        </button>
+      </div>
+      
+      <!-- Content Panel -->
+      <div id="tab-content">
+        {% include "partials/_kpi_table.html" %}
+      </div>
+    </div>
+
+  </div>
+{% endblock %}

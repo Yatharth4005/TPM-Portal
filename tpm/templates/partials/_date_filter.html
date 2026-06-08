@@ -12,7 +12,7 @@
 
     <div style="display: flex; flex-direction: column;">
       <label style="font-size: 0.75rem; font-weight: bold; color: var(--jspl-muted); margin-bottom: 4px;">Filter Type</label>
-      <select name="filter_type" id="filter-type-select" class="input-mono" style="width: 140px; height: 36px; padding: 6px 12px;" onchange="toggleFilterTypeView()">
+      <select name="filter_type" id="filter-type-select" class="input-mono" style="width: 160px; max-width: 160px; height: 36px; padding: 6px 12px;" onchange="toggleFilterTypeView()">
         <option value="single" {% if filter_type == 'single' or not filter_type %}selected{% endif %}>Single Month</option>
         <option value="range" {% if filter_type == 'range' %}selected{% endif %}>Date Range</option>
       </select>

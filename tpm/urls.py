@@ -17,6 +17,13 @@ urlpatterns = [
     path('department/<int:dept_id>/',
          department_views.dept_overview, name='dept_overview'),
 
+    # Workstation KPI
+    path('department/<int:dept_id>/pillar/ws-kpi/',
+         ws_kpi_views.ws_kpi_page, name='ws_kpi_page'),
+
+    path('department/<int:dept_id>/pillar/ws-kpi/save/<int:ws_id>/',
+         ws_kpi_views.save_workstation, name='save_workstation'),
+
     # Pillar (standard 8)
     path('department/<int:dept_id>/pillar/<str:pillar_id>/',
          pillar_views.pillar_page, name='pillar_page'),
@@ -36,13 +43,6 @@ urlpatterns = [
     # HTMX partial: analytics tab (swaps #analytics-container)
     path('department/<int:dept_id>/pillar/<str:pillar_id>/analytics/',
          pillar_views.analytics_partial, name='analytics_partial'),
-
-    # Workstation KPI
-    path('department/<int:dept_id>/pillar/ws-kpi/',
-         ws_kpi_views.ws_kpi_page, name='ws_kpi_page'),
-
-    path('department/<int:dept_id>/pillar/ws-kpi/save/<int:ws_id>/',
-         ws_kpi_views.save_workstation, name='save_workstation'),
 
     # Reports
     path('department/<int:dept_id>/report/',

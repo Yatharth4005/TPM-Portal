@@ -4,7 +4,7 @@ from django.shortcuts import render
 from django.db.models import Avg, Sum
 from tpm.models import Department, PillarEntry, KPIValue, WorkstationValue, WorkstationKPI
 from tpm.utils.decorators import admin_required
-from tpm.utils.calculations import compute_achievement
+from tpm.utils.calculations import compute_achievement, parse_period, get_date_range_q
 
 def sidebar_context_processor(request):
     if not request.user.is_authenticated:
@@ -31,55 +31,82 @@ def sidebar_context_processor(request):
     }
 
 
+def get_months_list():
+    return [
+        (1, 'January'), (2, 'February'), (3, 'March'), (4, 'April'),
+        (5, 'May'), (6, 'June'), (7, 'July'), (8, 'August'),
+        (9, 'September'), (10, 'October'), (11, 'November'), (12, 'December')
+    ]
+
+
+def get_months_in_range(from_month, from_year, to_month, to_year):
+    months_labels_short = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    result = []
+    m = from_month
+    y = from_year
+    while y < to_year or (y == to_year and m <= to_month):
+        result.append({
+            'month': m,
+            'year': y,
+            'label': f"{months_labels_short[m-1]} '{str(y)[-2:]}"
+        })
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    return result
+
+
 @admin_required
 def plant_dashboard(request):
-    today = datetime.date.today()
-    selected_month = int(request.GET.get('month', today.month))
-    selected_year = int(request.GET.get('year', today.year))
+    period = parse_period(request)
+    filter_type = period['filter_type']
+    selected_month = period['month']
+    selected_year = period['year']
+    from_month = period['from_month']
+    from_year = period['from_year']
+    to_month = period['to_month']
+    to_year = period['to_year']
+    period_label = period['label']
     
     depts = Department.objects.all().order_by('name')
+    today = datetime.date.today()
     
-    # 1. Plant Overall OEE (average KK row 1 actuals for selected month/year)
+    # 1. Plant Overall OEE (average KK row 1 actuals for selected month/year/range)
     oee_avg = KPIValue.objects.filter(
+        get_date_range_q(prefix='pillar_entry__', from_month=from_month, from_year=from_year, to_month=to_month, to_year=to_year),
         pillar_entry__pillar='KK',
-        pillar_entry__month=selected_month,
-        pillar_entry__year=selected_year,
         sl_no='1'
     ).aggregate(avg=Avg('actual'))['avg'] or 0.0
 
-    # 2. Total YTD Kaizens (KK sl_no='7' actuals YTD)
+    # 2. Total Kaizens (KK sl_no='7' actuals over period)
     kaizen_ytd = KPIValue.objects.filter(
+        get_date_range_q(prefix='pillar_entry__', from_month=from_month, from_year=from_year, to_month=to_month, to_year=to_year),
         pillar_entry__pillar='KK',
-        pillar_entry__year=selected_year,
-        pillar_entry__month__lte=selected_month,
         sl_no='7'
     ).aggregate(total=Sum('actual'))['total'] or 0.0
 
-    # 3. SHE: Zero LTI Count (sum of LTI numbers for the selected month/year)
+    # 3. SHE: Zero LTI Count (sum of LTI numbers)
     lti_sum = KPIValue.objects.filter(
+        get_date_range_q(prefix='pillar_entry__', from_month=from_month, from_year=from_year, to_month=to_month, to_year=to_year),
         pillar_entry__pillar='SHE',
-        pillar_entry__month=selected_month,
-        pillar_entry__year=selected_year,
         sl_no__in=['2A', '2B']  # Fatal + LTI
     ).aggregate(total=Sum('actual'))['total'] or 0.0
 
     # 4. PM Compliance (average of PM scheduled compliance row 14)
     pm_compliance = KPIValue.objects.filter(
+        get_date_range_q(prefix='pillar_entry__', from_month=from_month, from_year=from_year, to_month=to_month, to_year=to_year),
         pillar_entry__pillar='PM',
-        pillar_entry__month=selected_month,
-        pillar_entry__year=selected_year,
         sl_no='14'
     ).aggregate(avg=Avg('actual'))['avg'] or 0.0
 
-    # Department Cards Detail YTD
+    # Department Cards Detail
     dept_cards = []
     for d in depts:
-        # Compute department average achievement across all pillars for the month
-        # Standard 8 pillars:
+        # Compute department average achievement across all pillars for the month/range
         kpi_vals = KPIValue.objects.filter(
-            pillar_entry__department=d,
-            pillar_entry__month=selected_month,
-            pillar_entry__year=selected_year
+            get_date_range_q(prefix='pillar_entry__', from_month=from_month, from_year=from_year, to_month=to_month, to_year=to_year),
+            pillar_entry__department=d
         )
         
         achievements = []
@@ -90,9 +117,8 @@ def plant_dashboard(request):
                 
         # Workstation KPIs
         ws_vals = WorkstationValue.objects.filter(
-            workstation_kpi__workstation__department=d,
-            month=selected_month,
-            year=selected_year
+            get_date_range_q(from_month=from_month, from_year=from_year, to_month=to_month, to_year=to_year),
+            workstation_kpi__workstation__department=d
         )
         for val in ws_vals:
             if val.actual is not None and val.workstation_kpi.commitment is not None:
@@ -117,14 +143,19 @@ def plant_dashboard(request):
             status = 'behind'
             status_class = 'bg-danger-subtle text-danger border-danger'
             
-        # Sparkline data (OEE actuals over last 6 months)
+        # Sparkline data (OEE actuals over last 6 months leading to end of range)
         sparkline_data = []
-        for m in range(max(1, selected_month - 5), selected_month + 1):
+        for i in range(5, -1, -1):
+            sm = to_month - i
+            sy = to_year
+            if sm <= 0:
+                sm += 12
+                sy -= 1
             val = KPIValue.objects.filter(
                 pillar_entry__department=d,
                 pillar_entry__pillar='KK',
-                pillar_entry__month=m,
-                pillar_entry__year=selected_year,
+                pillar_entry__month=sm,
+                pillar_entry__year=sy,
                 sl_no='1'
             ).first()
             sparkline_data.append(val.actual if val else 0.0)
@@ -144,29 +175,38 @@ def plant_dashboard(request):
     top_performers = sorted_cards[:5]
     bottom_performers = sorted_cards[-5:][::-1] if len(sorted_cards) >= 5 else sorted_cards[::-1]
 
-    # Chart data structure: Monthly Plant OEE trend (Line chart, Jan-Dec)
+    # Chart data structure: Monthly Plant OEE trend
     months_labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    if filter_type == 'range':
+        range_months = get_months_in_range(from_month, from_year, to_month, to_year)
+    else:
+        range_months = [{
+            'month': m,
+            'year': selected_year,
+            'label': months_labels[m-1]
+        } for m in range(1, 13)]
+
     oee_trend_actuals = []
     oee_trend_targets = []
-    
-    for m in range(1, 13):
+    chart_labels = []
+    for rm in range_months:
         avg_act = KPIValue.objects.filter(
             pillar_entry__pillar='KK',
-            pillar_entry__month=m,
-            pillar_entry__year=selected_year,
+            pillar_entry__month=rm['month'],
+            pillar_entry__year=rm['year'],
             sl_no='1'
         ).aggregate(avg=Avg('actual'))['avg'] or None
         oee_trend_actuals.append(avg_act)
         oee_trend_targets.append(85.0)  # Plant benchmark target is 85%
+        chart_labels.append(rm['label'])
 
     # Radar Chart: average achievement for each of the 9 pillars plant-wide
     radar_data = []
     radar_labels = ['KK', 'JH', 'PM', 'QM', 'ET', 'DM', 'SHE', 'OTPM', 'WS KPI']
     for pillar in ['KK', 'JH', 'PM', 'QM', 'ET', 'DM', 'SHE', 'OTPM']:
         vals = KPIValue.objects.filter(
-            pillar_entry__pillar=pillar,
-            pillar_entry__month=selected_month,
-            pillar_entry__year=selected_year
+            get_date_range_q(prefix='pillar_entry__', from_month=from_month, from_year=from_year, to_month=to_month, to_year=to_year),
+            pillar_entry__pillar=pillar
         )
         ach_list = []
         for val in vals:
@@ -175,7 +215,9 @@ def plant_dashboard(request):
         radar_data.append(round(sum(ach_list)/len(ach_list), 1) if ach_list else 0.0)
 
     # Workstation KPI average achievement
-    ws_kpis = WorkstationValue.objects.filter(month=selected_month, year=selected_year)
+    ws_kpis = WorkstationValue.objects.filter(
+        get_date_range_q(from_month=from_month, from_year=from_year, to_month=to_month, to_year=to_year)
+    )
     ws_ach_list = []
     for val in ws_kpis:
         if val.actual is not None and val.workstation_kpi.commitment is not None:
@@ -188,12 +230,12 @@ def plant_dashboard(request):
             ws_ach_list.append(ach)
     radar_data.append(round(sum(ws_ach_list)/len(ws_ach_list), 1) if ws_ach_list else 0.0)
 
-    # Compliance Heatmap Grid (28 departments x last 6 months)
+    # Compliance Heatmap Grid
     heatmap = []
     heatmap_months = []
     for i in range(5, -1, -1):
-        target_month = selected_month - i
-        target_year = selected_year
+        target_month = to_month - i
+        target_year = to_year
         if target_month <= 0:
             target_month += 12
             target_year -= 1
@@ -206,7 +248,6 @@ def plant_dashboard(request):
     for d in depts:
         row = {'dept_name': d.name, 'scores': []}
         for hm in heatmap_months:
-            # calculate average achievement
             kpis = KPIValue.objects.filter(
                 pillar_entry__department=d,
                 pillar_entry__month=hm['month'],
@@ -234,7 +275,6 @@ def plant_dashboard(request):
 
             avg_ach = sum(ach_list) / len(ach_list) if ach_list else None
             
-            # color mapping
             color_class = 'bg-light text-muted'
             if avg_ach is not None:
                 if avg_ach >= 90.0:
@@ -250,9 +290,23 @@ def plant_dashboard(request):
             })
         heatmap.append(row)
 
+    if filter_type == 'range':
+        query_params = f"filter_type=range&from_month={from_month}&from_year={from_year}&to_month={to_month}&to_year={to_year}"
+    else:
+        query_params = f"filter_type=single&month={selected_month}&year={selected_year}"
+
     context = {
-        'selected_month': selected_month,
-        'selected_year': selected_year,
+        'filter_type': filter_type,
+        'month': selected_month,
+        'year': selected_year,
+        'from_month': from_month,
+        'from_year': from_year,
+        'to_month': to_month,
+        'to_year': to_year,
+        'period_label': period_label,
+        'query_params': query_params,
+        'months': get_months_list(),
+        'years': range(2025, today.year + 2),
         'oee_avg': round(oee_avg, 1),
         'kaizen_ytd': int(kaizen_ytd),
         'lti_sum': int(lti_sum),
@@ -266,6 +320,6 @@ def plant_dashboard(request):
         'oee_trend_targets_json': json.dumps(oee_trend_targets),
         'radar_labels_json': json.dumps(radar_labels),
         'radar_data_json': json.dumps(radar_data),
-        'months_labels_json': json.dumps(months_labels),
+        'months_labels_json': json.dumps(chart_labels),
     }
     return render(request, 'dashboard/plant_dashboard.html', context)

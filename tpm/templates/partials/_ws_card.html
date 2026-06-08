@@ -42,11 +42,15 @@
               <td style="text-align: center;"><span class="badge badge-muted">{{ kpi.uom }}</span></td>
               <td class="mono" style="text-align: right;">{{ kpi.baseline|default:"—" }}</td>
               <td class="mono" style="text-align: right; font-weight: 600;">{{ kpi.commitment|default:"—" }}</td>
-              <td>
-                <input type="number" name="actual_{{ kpi.id }}" step="any"
-                       value="{{ kpi.actual|default:'' }}"
-                       class="input-mono" style="text-align: right; width: 100%; max-width: 100px;"
-                       placeholder="Enter actual">
+              <td class="mono" style="text-align: right;">
+                {% if filter_type == 'range' %}
+                  <span>{{ kpi.actual|default:"—" }}</span>
+                {% else %}
+                  <input type="number" name="actual_{{ kpi.id }}" step="any"
+                         value="{{ kpi.actual|default:'' }}"
+                         class="input-mono" style="text-align: right; width: 100%; max-width: 100px;"
+                         placeholder="Enter actual">
+                {% endif %}
               </td>
               <td style="text-align: center;">
                 {% if kpi.achievement is not None %}
@@ -58,8 +62,12 @@
                 {% endif %}
               </td>
               <td>
-                <input type="text" name="remarks_{{ kpi.id }}" value="{{ kpi.remarks }}"
-                       class="input-remarks" style="width: 100%;" placeholder="Add comment...">
+                {% if filter_type == 'range' %}
+                  <span style="font-size: 0.85rem; color: var(--jspl-muted);">{{ kpi.remarks }}</span>
+                {% else %}
+                  <input type="text" name="remarks_{{ kpi.id }}" value="{{ kpi.remarks }}"
+                         class="input-remarks" style="width: 100%;" placeholder="Add comment...">
+                {% endif %}
               </td>
             </tr>
           {% endfor %}
@@ -67,10 +75,12 @@
       </table>
     </div>
     
-    <div style="display: flex; justify-content: flex-end;">
-      <button type="submit" class="btn btn-primary" style="padding: 6px 16px;">
-        💾 Save Workstation
-      </button>
-    </div>
+    {% if filter_type != 'range' %}
+      <div style="display: flex; justify-content: flex-end;">
+        <button type="submit" class="btn btn-primary" style="padding: 6px 16px;">
+          💾 Save Workstation
+        </button>
+      </div>
+    {% endif %}
   </form>
 </div>

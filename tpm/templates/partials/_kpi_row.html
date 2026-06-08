@@ -21,7 +21,9 @@
   
   <!-- Target -->
   <td class="mono" style="text-align: right;">
-    {% if request.user.is_admin %}
+    {% if filter_type == 'range' %}
+      <span>{{ row.target|default:"—" }}</span>
+    {% elif request.user.is_admin %}
       <input type="number" name="target" value="{{ row.target|default:'' }}"
              class="input-mono" style="text-align: right;"
              hx-post="{% url 'save_kpi_row' dept.id pillar_id %}?month={{ month }}&year={{ year }}&sl_no={{ row.sl_no }}"
@@ -33,44 +35,60 @@
   </td>
   
   <!-- Actual -->
-  <td>
-    <input type="number" name="actual" x-model="actual" step="any"
-           class="input-mono" style="text-align: right;"
-           {% if row.is_oee_row %}readonly style="background-color: #F3F4F6;"{% endif %}
-           hx-post="{% url 'save_kpi_row' dept.id pillar_id %}?month={{ month }}&year={{ year }}&sl_no={{ row.sl_no }}"
-           hx-trigger="blur" hx-include="closest tr"
-           hx-target="#row-{{ row.sl_no }}" hx-swap="outerHTML"
-           {% if is_locked %}disabled{% endif %}>
+  <td class="mono" style="text-align: right;">
+    {% if filter_type == 'range' %}
+      <span>{{ row.actual|default:"—" }}</span>
+    {% else %}
+      <input type="number" name="actual" x-model="actual" step="any"
+             class="input-mono" style="text-align: right;"
+             {% if row.is_oee_row %}readonly style="background-color: #F3F4F6;"{% endif %}
+             hx-post="{% url 'save_kpi_row' dept.id pillar_id %}?month={{ month }}&year={{ year }}&sl_no={{ row.sl_no }}"
+             hx-trigger="blur" hx-include="closest tr"
+             hx-target="#row-{{ row.sl_no }}" hx-swap="outerHTML"
+             {% if is_locked %}disabled{% endif %}>
+    {% endif %}
   </td>
 
   <!-- OEE Components (only for KK pillar row 1) -->
   {% if pillar_id == 'KK' %}
-    <td>
-      <input type="number" name="availability" x-model="availability" step="any"
-             class="input-mono" style="text-align: right;"
-             {% if row.sl_no != '1' or is_locked %}disabled{% endif %}
-             @input="computeOEE()"
-             hx-post="{% url 'save_kpi_row' dept.id pillar_id %}?month={{ month }}&year={{ year }}&sl_no={{ row.sl_no }}"
-             hx-trigger="blur" hx-include="closest tr"
-             hx-target="#row-{{ row.sl_no }}" hx-swap="outerHTML">
+    <td class="mono" style="text-align: right;">
+      {% if filter_type == 'range' %}
+        <span>{{ row.availability|default:"—" }}</span>
+      {% else %}
+        <input type="number" name="availability" x-model="availability" step="any"
+               class="input-mono" style="text-align: right;"
+               {% if row.sl_no != '1' or is_locked %}disabled{% endif %}
+               @input="computeOEE()"
+               hx-post="{% url 'save_kpi_row' dept.id pillar_id %}?month={{ month }}&year={{ year }}&sl_no={{ row.sl_no }}"
+               hx-trigger="blur" hx-include="closest tr"
+               hx-target="#row-{{ row.sl_no }}" hx-swap="outerHTML">
+      {% endif %}
     </td>
-    <td>
-      <input type="number" name="performance" x-model="performance" step="any"
-             class="input-mono" style="text-align: right;"
-             {% if row.sl_no != '1' or is_locked %}disabled{% endif %}
-             @input="computeOEE()"
-             hx-post="{% url 'save_kpi_row' dept.id pillar_id %}?month={{ month }}&year={{ year }}&sl_no={{ row.sl_no }}"
-             hx-trigger="blur" hx-include="closest tr"
-             hx-target="#row-{{ row.sl_no }}" hx-swap="outerHTML">
+    <td class="mono" style="text-align: right;">
+      {% if filter_type == 'range' %}
+        <span>{{ row.performance|default:"—" }}</span>
+      {% else %}
+        <input type="number" name="performance" x-model="performance" step="any"
+               class="input-mono" style="text-align: right;"
+               {% if row.sl_no != '1' or is_locked %}disabled{% endif %}
+               @input="computeOEE()"
+               hx-post="{% url 'save_kpi_row' dept.id pillar_id %}?month={{ month }}&year={{ year }}&sl_no={{ row.sl_no }}"
+               hx-trigger="blur" hx-include="closest tr"
+               hx-target="#row-{{ row.sl_no }}" hx-swap="outerHTML">
+      {% endif %}
     </td>
-    <td>
-      <input type="number" name="quality" x-model="quality" step="any"
-             class="input-mono" style="text-align: right;"
-             {% if row.sl_no != '1' or is_locked %}disabled{% endif %}
-             @input="computeOEE()"
-             hx-post="{% url 'save_kpi_row' dept.id pillar_id %}?month={{ month }}&year={{ year }}&sl_no={{ row.sl_no }}"
-             hx-trigger="blur" hx-include="closest tr"
-             hx-target="#row-{{ row.sl_no }}" hx-swap="outerHTML">
+    <td class="mono" style="text-align: right;">
+      {% if filter_type == 'range' %}
+        <span>{{ row.quality|default:"—" }}</span>
+      {% else %}
+        <input type="number" name="quality" x-model="quality" step="any"
+               class="input-mono" style="text-align: right;"
+               {% if row.sl_no != '1' or is_locked %}disabled{% endif %}
+               @input="computeOEE()"
+               hx-post="{% url 'save_kpi_row' dept.id pillar_id %}?month={{ month }}&year={{ year }}&sl_no={{ row.sl_no }}"
+               hx-trigger="blur" hx-include="closest tr"
+               hx-target="#row-{{ row.sl_no }}" hx-swap="outerHTML">
+      {% endif %}
     </td>
   {% endif %}
 
@@ -81,11 +99,15 @@
   
   <!-- Remarks -->
   <td>
-    <textarea name="remarks" rows="1" class="input-remarks"
-              hx-post="{% url 'save_kpi_row' dept.id pillar_id %}?month={{ month }}&year={{ year }}&sl_no={{ row.sl_no }}"
-              hx-trigger="blur" hx-include="closest tr"
-              hx-target="#row-{{ row.sl_no }}" hx-swap="outerHTML"
-              placeholder="Add remark..."
-              {% if is_locked %}disabled{% endif %}>{{ row.remarks }}</textarea>
+    {% if filter_type == 'range' %}
+      <span style="font-size: 0.85rem; color: var(--jspl-muted);">{{ row.remarks }}</span>
+    {% else %}
+      <textarea name="remarks" rows="1" class="input-remarks"
+                hx-post="{% url 'save_kpi_row' dept.id pillar_id %}?month={{ month }}&year={{ year }}&sl_no={{ row.sl_no }}"
+                hx-trigger="blur" hx-include="closest tr"
+                hx-target="#row-{{ row.sl_no }}" hx-swap="outerHTML"
+                placeholder="Add remark..."
+                {% if is_locked %}disabled{% endif %}>{{ row.remarks }}</textarea>
+    {% endif %}
   </td>
 </tr>

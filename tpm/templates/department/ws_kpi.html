@@ -6,51 +6,29 @@
   {% if request.user.is_admin %}
     <a href="{% url 'plant_dashboard' %}">Plant Dashboard</a>
   {% endif %}
-  <a href="{% url 'dept_overview' dept.id %}">{{ dept.name }}</a>
+  <a href="{% url 'dept_overview' dept.id }}">{{ dept.name }}</a>
   <span>Workstation KPIs</span>
 {% endblock %}
 
 {% block content %}
   <div style="background-color: var(--jspl-white); border: 1px solid var(--jspl-border); border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow-sm); margin-bottom: 24px;">
-    
     <!-- Title and Filter Row -->
     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--jspl-border); padding-bottom: 16px; margin-bottom: 20px;">
       <div>
         <h2 style="color: var(--jspl-navy);">🔧 Workstation KPIs (9th Pillar)</h2>
         <span style="font-size: 0.85rem; color: var(--jspl-muted);">Department: <b>{{ dept.name }}</b></span>
       </div>
-      
-      <div>
-        <form method="GET" style="display: flex; gap: 10px; align-items: center;">
-          <input type="hidden" name="tab" value="{{ tab }}">
-          
-          <div style="display: flex; flex-direction: column;">
-            <label style="font-size: 0.75rem; font-weight: bold; color: var(--jspl-muted); margin-bottom: 2px;">Month</label>
-            <select name="month" class="input-mono" style="width: 140px;" onchange="this.form.submit()">
-              {% for m_id, m_name in months %}
-                <option value="{{ m_id }}" {% if m_id == month %}selected{% endif %}>{{ m_name }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          
-          <div style="display: flex; flex-direction: column;">
-            <label style="font-size: 0.75rem; font-weight: bold; color: var(--jspl-muted); margin-bottom: 2px;">Year</label>
-            <select name="year" class="input-mono" style="width: 100px;" onchange="this.form.submit()">
-              {% for y in years %}
-                <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
-              {% endfor %}
-            </select>
-          </div>
-        </form>
-      </div>
     </div>
+
+    <!-- Reusable Filter Ribbon -->
+    {% include "partials/_date_filter.html" %}
 
     <!-- TABS CONTROLLER -->
     <div class="tab-container">
-      <a href="?month={{ month }}&year={{ year }}&tab=entry" class="tab-btn {% if tab == 'entry' %}active{% endif %}">
+      <a href="?{{ query_params }}&tab=entry" class="tab-btn {% if tab == 'entry' %}active{% endif %}">
         📝 Data Entry Tab
       </a>
-      <a href="?month={{ month }}&year={{ year }}&tab=analytics" class="tab-btn {% if tab == 'analytics' %}active{% endif %}">
+      <a href="?{{ query_params }}&tab=analytics" class="tab-btn {% if tab == 'analytics' %}active{% endif %}">
         📊 Analytics Tab
       </a>
     </div>
@@ -58,6 +36,12 @@
     <!-- TAB PANEL CONTENT -->
     {% if tab == 'entry' %}
       
+      {% if filter_type == 'range' %}
+        <div class="lock-banner" style="background-color: var(--jspl-light); border-color: var(--jspl-border); color: var(--jspl-navy); margin-bottom: 20px;">
+          <span>ℹ️ You are viewing a summary of data aggregated for the period: <b>{{ period_label }}</b>. Data entry is disabled.</span>
+        </div>
+      {% endif %}
+
       {% if not ws_list %}
         <div style="padding: 40px; text-align: center; color: var(--jspl-muted);">
           <h3>No Workstations Configured</h3>
@@ -65,7 +49,7 @@
         </div>
       {% else %}
         {% for ws in ws_list %}
-          {% include "partials/_ws_card.html" with ws=ws dept=dept month=month year=year %}
+          {% include "partials/_ws_card.html" with ws=ws dept=dept month=month year=year filter_type=filter_type %}
         {% endfor %}
       {% endif %}
       
@@ -80,9 +64,13 @@
         <div style="margin-bottom: 20px; background-color: var(--jspl-gray); padding: 15px; border-radius: var(--radius); border: 1px solid var(--jspl-border);">
           <form method="GET" style="display: flex; gap: 15px; align-items: center;">
             <input type="hidden" name="tab" value="analytics">
+            <input type="hidden" name="filter_type" value="{{ filter_type }}">
             <input type="hidden" name="month" value="{{ month }}">
             <input type="hidden" name="year" value="{{ year }}">
-            
+            <input type="hidden" name="from_month" value="{{ from_month }}">
+            <input type="hidden" name="from_year" value="{{ from_year }}">
+            <input type="hidden" name="to_month" value="{{ to_month }}">
+            <input type="hidden" name="to_year" value="{{ to_year }}">
             <label style="font-weight: 600; color: var(--jspl-navy);">Select Workstation:</label>
             <select name="workstation_id" class="input-mono" style="width: 250px; max-width: 100%;" onchange="this.form.submit()">
               {% for w in workstations %}

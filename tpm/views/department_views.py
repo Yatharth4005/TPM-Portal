@@ -5,14 +5,46 @@ from django.shortcuts import get_object_or_404
 from django.contrib import messages
 from tpm.models import Department, PillarEntry, KPIValue, WorkstationValue, Workstation
 from tpm.utils.decorators import dept_access_required
-from tpm.utils.calculations import compute_achievement
+from tpm.utils.calculations import compute_achievement, parse_period, get_date_range_q
+
+def get_months_list():
+    return [
+        (1, 'January'), (2, 'February'), (3, 'March'), (4, 'April'),
+        (5, 'May'), (6, 'June'), (7, 'July'), (8, 'August'),
+        (9, 'September'), (10, 'October'), (11, 'November'), (12, 'December')
+    ]
+
+def get_months_in_range(from_month, from_year, to_month, to_year):
+    months_labels_short = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    result = []
+    m = from_month
+    y = from_year
+    while y < to_year or (y == to_year and m <= to_month):
+        result.append({
+            'month': m,
+            'year': y,
+            'label': f"{months_labels_short[m-1]} '{str(y)[-2:]}"
+        })
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    return result
 
 @dept_access_required
 def dept_overview(request, dept_id):
     dept = get_object_or_404(Department, id=dept_id)
+    period = parse_period(request)
+    filter_type = period['filter_type']
+    selected_month = period['month']
+    selected_year = period['year']
+    from_month = period['from_month']
+    from_year = period['from_year']
+    to_month = period['to_month']
+    to_year = period['to_year']
+    period_label = period['label']
+    
     today = datetime.date.today()
-    selected_month = int(request.GET.get('month', today.month))
-    selected_year = int(request.GET.get('year', today.year))
     
     pillars_meta = [
         {'id': 'KK', 'label': 'KK (Kobetsu Kaizen)', 'icon': '🎯'},
@@ -29,21 +61,25 @@ def dept_overview(request, dept_id):
     
     # Standard 8 Pillars scores calculation
     for pm in pillars_meta:
-        # Check if submitted
-        entry = PillarEntry.objects.filter(
+        # Check status
+        entries = PillarEntry.objects.filter(
+            get_date_range_q(from_month=from_month, from_year=from_year, to_month=to_month, to_year=to_year),
             department=dept,
-            pillar=pm['id'],
-            month=selected_month,
-            year=selected_year
-        ).first()
+            pillar=pm['id']
+        )
         
         status_label = 'Pending'
         status_class = 'badge-red'
-        if entry:
-            status_label = 'Locked' if entry.is_locked() else 'Draft'
-            status_class = 'badge-green' if entry.is_locked() else 'badge-amber'
+        if entries.exists():
+            all_locked = all(e.is_locked() for e in entries)
+            status_label = 'Locked' if all_locked else 'Draft'
+            status_class = 'badge-green' if all_locked else 'badge-amber'
             
-        kpis = KPIValue.objects.filter(pillar_entry=entry) if entry else []
+        kpis = KPIValue.objects.filter(
+            get_date_range_q(prefix='pillar_entry__', from_month=from_month, from_year=from_year, to_month=to_month, to_year=to_year),
+            pillar_entry__department=dept,
+            pillar_entry__pillar=pm['id']
+        )
         ach_list = []
         for k in kpis:
             if k.actual is not None and k.target is not None:
@@ -62,9 +98,8 @@ def dept_overview(request, dept_id):
         
     # Workstation KPI (9th card)
     ws_vals = WorkstationValue.objects.filter(
-        workstation_kpi__workstation__department=dept,
-        month=selected_month,
-        year=selected_year
+        get_date_range_q(from_month=from_month, from_year=from_year, to_month=to_month, to_year=to_year),
+        workstation_kpi__workstation__department=dept
     )
     ws_ach_list = []
     for val in ws_vals:
@@ -91,30 +126,41 @@ def dept_overview(request, dept_id):
         'status_class': ws_class,
     })
 
-    # OEE monthly actual vs target line chart trend (last 12 months)
+    # OEE monthly actual vs target line chart trend
     oee_trend_actuals = []
     oee_trend_targets = []
     months_labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-    for m in range(1, 13):
+    if filter_type == 'range':
+        range_months = get_months_in_range(from_month, from_year, to_month, to_year)
+    else:
+        range_months = [{
+            'month': m,
+            'year': selected_year,
+            'label': months_labels[m-1]
+        } for m in range(1, 13)]
+
+    chart_labels = []
+    for rm in range_months:
         val = KPIValue.objects.filter(
             pillar_entry__department=dept,
             pillar_entry__pillar='KK',
-            pillar_entry__month=m,
-            pillar_entry__year=selected_year,
+            pillar_entry__month=rm['month'],
+            pillar_entry__year=rm['year'],
             sl_no='1'
         ).first()
         oee_trend_actuals.append(val.actual if val else None)
         oee_trend_targets.append(val.target if val and val.target else 90.0)
+        chart_labels.append(rm['label'])
 
     # 9-axis radar data for this department specifically
     radar_labels = ['KK', 'JH', 'PM', 'QM', 'ET', 'DM', 'SHE', 'OTPM', 'WS KPI']
     radar_data = [card['achievement'] for card in pillar_cards]
 
-    # Recent submissions table (last 6 months submission status for all 8 pillars)
+    # Recent submissions table (last 6 months relative to range end date)
     recent_months = []
     for i in range(5, -1, -1):
-        target_month = selected_month - i
-        target_year = selected_year
+        target_month = to_month - i
+        target_year = to_year
         if target_month <= 0:
             target_month += 12
             target_year -= 1
@@ -155,10 +201,24 @@ def dept_overview(request, dept_id):
         ws_row['months'].append({'status': status_text, 'class': status_cls})
     submission_rows.append(ws_row)
 
+    if filter_type == 'range':
+        query_params = f"filter_type=range&from_month={from_month}&from_year={from_year}&to_month={to_month}&to_year={to_year}"
+    else:
+        query_params = f"filter_type=single&month={selected_month}&year={selected_year}"
+
     context = {
         'dept': dept,
+        'filter_type': filter_type,
         'selected_month': selected_month,
         'selected_year': selected_year,
+        'from_month': from_month,
+        'from_year': from_year,
+        'to_month': to_month,
+        'to_year': to_year,
+        'period_label': period_label,
+        'query_params': query_params,
+        'months': get_months_list(),
+        'years': range(2025, today.year + 2),
         'pillar_cards': pillar_cards,
         'recent_months': recent_months,
         'submission_rows': submission_rows,
@@ -166,6 +226,6 @@ def dept_overview(request, dept_id):
         'oee_trend_targets_json': json.dumps(oee_trend_targets),
         'radar_labels_json': json.dumps(radar_labels),
         'radar_data_json': json.dumps(radar_data),
-        'months_labels_json': json.dumps(months_labels),
+        'months_labels_json': json.dumps(chart_labels),
     }
     return render(request, 'department/overview.html', context)

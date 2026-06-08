@@ -13,12 +13,27 @@ from reportlab.lib.units import inch
 
 from tpm.models import PillarEntry, KPIValue, WorkstationValue, Workstation
 from tpm.utils.kpi_definitions import KPI_DEFINITIONS
-from tpm.utils.calculations import compute_achievement
+from tpm.utils.calculations import compute_achievement, get_date_range_q, aggregate_kpi_actual
 
-def generate_pillar_excel(dept, month, year):
+def generate_pillar_excel(dept, from_month, from_year, to_month, to_year, filter_type):
     """Generates an Excel workbook with sheets for Summary and each active Pillar"""
     wb = Workbook()
     
+    months_map = dict([
+        (1, 'Jan'), (2, 'Feb'), (3, 'Mar'), (4, 'Apr'),
+        (5, 'May'), (6, 'Jun'), (7, 'Jul'), (8, 'Aug'),
+        (9, 'Sep'), (10, 'Oct'), (11, 'Nov'), (12, 'Dec')
+    ])
+    if filter_type == 'range':
+        period_label = f"{months_map.get(from_month)} {from_year} - {months_map.get(to_month)} {to_year}"
+    else:
+        months_full = [
+            (1, 'January'), (2, 'February'), (3, 'March'), (4, 'April'),
+            (5, 'May'), (6, 'June'), (7, 'July'), (8, 'August'),
+            (9, 'September'), (10, 'October'), (11, 'November'), (12, 'December')
+        ]
+        period_label = f"{dict(months_full).get(from_month)} {from_year}"
+
     # 1. Summary Sheet
     ws_summary = wb.active
     ws_summary.title = "Summary Overview"
@@ -33,7 +48,7 @@ def generate_pillar_excel(dept, month, year):
     
     ws_summary['A3'] = f"Department: {dept.name} ({dept.code})"
     ws_summary['A3'].font = Font(name='Segoe UI', size=11, bold=True)
-    ws_summary['A4'] = f"Report Period: {month}/{year}"
+    ws_summary['A4'] = f"Report Period: {period_label}"
     ws_summary['A4'].font = Font(name='Segoe UI', size=11, italic=True)
     
     headers = ["Pillar Code", "Pillar Name", "Total KPIs", "On Track (>=90%)", "At Risk (75-89%)", "Behind (<75%)"]
@@ -64,31 +79,38 @@ def generate_pillar_excel(dept, month, year):
     
     row_idx = 7
     for code, name in pillars_meta:
-        entry = PillarEntry.objects.filter(department=dept, pillar=code, month=month, year=year).first()
-        kpis = KPIValue.objects.filter(pillar_entry=entry) if entry else []
-        
-        total = len(kpis)
+        definitions = KPI_DEFINITIONS.get(code, [])
+        total = len(definitions)
         on_track = 0
         at_risk = 0
         behind = 0
+        has_any_data = False
         
-        for k in kpis:
-            if k.actual is not None and k.target is not None:
-                ach = compute_achievement(k.actual, k.target, k.kpi_name)
-                if ach >= 90:
-                    on_track += 1
-                elif ach >= 75:
-                    at_risk += 1
-                else:
-                    behind += 1
-                    
+        for d in definitions:
+            kpi_values = KPIValue.objects.filter(
+                get_date_range_q(prefix='pillar_entry__', from_month=from_month, from_year=from_year, to_month=to_month, to_year=to_year),
+                pillar_entry__department=dept,
+                pillar_entry__pillar=code,
+                sl_no=d['sl_no']
+            )
+            if kpi_values.exists():
+                has_any_data = True
+                actual, target, benchmark = aggregate_kpi_actual(kpi_values, d['uom'], d['name'])
+                if actual is not None and target is not None:
+                    ach = compute_achievement(actual, target, d['name'])
+                    if ach >= 90:
+                        on_track += 1
+                    elif ach >= 75:
+                        at_risk += 1
+                    else:
+                        behind += 1
+                        
         ws_summary.cell(row=row_idx, column=1, value=code)
         ws_summary.cell(row=row_idx, column=2, value=name)
-        ws_summary.cell(row=row_idx, column=3, value=total if entry else "N/A")
-        ws_summary.cell(row=row_idx, column=4, value=on_track if entry else "N/A")
-        ws_summary.cell(row=row_idx, column=5, value=at_risk if entry else "N/A")
-        
-        behind_cell = ws_summary.cell(row=row_idx, column=6, value=behind if entry else "N/A")
+        ws_summary.cell(row=row_idx, column=3, value=total if has_any_data else "N/A")
+        ws_summary.cell(row=row_idx, column=4, value=on_track if has_any_data else "N/A")
+        ws_summary.cell(row=row_idx, column=5, value=at_risk if has_any_data else "N/A")
+        ws_summary.cell(row=row_idx, column=6, value=behind if has_any_data else "N/A")
         
         for col in range(1, 7):
             c = ws_summary.cell(row=row_idx, column=col)
@@ -110,7 +132,7 @@ def generate_pillar_excel(dept, month, year):
         ws = wb.create_sheet(title=code)
         ws.views.sheetView[0].showGridLines = True
         
-        ws.cell(row=1, column=1, value=f"{code} — {name} Report ({month}/{year})").font = Font(name='Segoe UI', size=14, bold=True, color='003478')
+        ws.cell(row=1, column=1, value=f"{code} — {name} Report ({period_label})").font = Font(name='Segoe UI', size=14, bold=True, color='003478')
         
         headers = ["Sl No", "KPI Name", "UOM", "Benchmark", "Target", "Actual", "Achievement %", "Remarks"]
         for col_idx, h in enumerate(headers, 1):
@@ -120,17 +142,26 @@ def generate_pillar_excel(dept, month, year):
             cell.fill = PatternFill(start_color='0057A8', end_color='0057A8', fill_type='solid')
             cell.alignment = Alignment(horizontal='center')
             
-        entry = PillarEntry.objects.filter(department=dept, pillar=code, month=month, year=year).first()
         definitions = KPI_DEFINITIONS.get(code, [])
         
         p_row = 4
         for d in definitions:
-            db_val = KPIValue.objects.filter(pillar_entry=entry, sl_no=d['sl_no']).first() if entry else None
+            kpi_values = KPIValue.objects.filter(
+                get_date_range_q(prefix='pillar_entry__', from_month=from_month, from_year=from_year, to_month=to_month, to_year=to_year),
+                pillar_entry__department=dept,
+                pillar_entry__pillar=code,
+                sl_no=d['sl_no']
+            )
             
-            actual = db_val.actual if db_val else None
-            target = db_val.target if db_val else d['target']
-            benchmark = db_val.benchmark if db_val else d['benchmark']
-            remarks = db_val.remarks if db_val else ''
+            if kpi_values.exists():
+                actual, target, benchmark = aggregate_kpi_actual(kpi_values, d['uom'], d['name'])
+                remarks_list = [v.remarks.strip() for v in kpi_values if v.remarks.strip()]
+                remarks = " | ".join(remarks_list) if remarks_list else ""
+            else:
+                actual = None
+                target = d['target']
+                benchmark = d['benchmark']
+                remarks = ''
             
             achievement = ""
             if actual is not None and target is not None:
@@ -167,7 +198,7 @@ def generate_pillar_excel(dept, month, year):
     return output.getvalue()
 
 
-def generate_pillar_pdf(dept, month, year):
+def generate_pillar_pdf(dept, from_month, from_year, to_month, to_year, filter_type):
     """Generates a professional PDF monthly report for the department using ReportLab"""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -238,10 +269,25 @@ def generate_pillar_pdf(dept, month, year):
 
     story = []
     
+    months_map = dict([
+        (1, 'Jan'), (2, 'Feb'), (3, 'Mar'), (4, 'Apr'),
+        (5, 'May'), (6, 'Jun'), (7, 'Jul'), (8, 'Aug'),
+        (9, 'Sep'), (10, 'Oct'), (11, 'Nov'), (12, 'Dec')
+    ])
+    if filter_type == 'range':
+        period_label = f"{months_map.get(from_month)} {from_year} - {months_map.get(to_month)} {to_year}"
+    else:
+        months_full = [
+            (1, 'January'), (2, 'February'), (3, 'March'), (4, 'April'),
+            (5, 'May'), (6, 'June'), (7, 'July'), (8, 'August'),
+            (9, 'September'), (10, 'October'), (11, 'November'), (12, 'December')
+        ]
+        period_label = f"{dict(months_full).get(from_month)} {from_year}"
+
     # JSPL Header Block
     story.append(Paragraph("JINDAL STEEL & POWER LIMITED", title_style))
     story.append(Paragraph(f"Monthly TPM Performance Report — {dept.name} ({dept.code})", subtitle_style))
-    story.append(Paragraph(f"Report Period: {month}/{year}", subtitle_style))
+    story.append(Paragraph(f"Report Period: {period_label}", subtitle_style))
     story.append(Spacer(1, 15))
     
     # Overview Summary
@@ -266,30 +312,38 @@ def generate_pillar_pdf(dept, month, year):
     ]
     
     for code, name in pillars_meta:
-        entry = PillarEntry.objects.filter(department=dept, pillar=code, month=month, year=year).first()
-        kpis = KPIValue.objects.filter(pillar_entry=entry) if entry else []
-        
-        total = len(kpis)
+        definitions = KPI_DEFINITIONS.get(code, [])
+        total = len(definitions)
         on_track = 0
         at_risk = 0
         behind = 0
+        has_any_data = False
         
-        for k in kpis:
-            if k.actual is not None and k.target is not None:
-                ach = compute_achievement(k.actual, k.target, k.kpi_name)
-                if ach >= 90:
-                    on_track += 1
-                elif ach >= 75:
-                    at_risk += 1
-                else:
-                    behind += 1
-                    
+        for d in definitions:
+            kpi_values = KPIValue.objects.filter(
+                get_date_range_q(prefix='pillar_entry__', from_month=from_month, from_year=from_year, to_month=to_month, to_year=to_year),
+                pillar_entry__department=dept,
+                pillar_entry__pillar=code,
+                sl_no=d['sl_no']
+            )
+            if kpi_values.exists():
+                has_any_data = True
+                actual, target, benchmark = aggregate_kpi_actual(kpi_values, d['uom'], d['name'])
+                if actual is not None and target is not None:
+                    ach = compute_achievement(actual, target, d['name'])
+                    if ach >= 90:
+                        on_track += 1
+                    elif ach >= 75:
+                        at_risk += 1
+                    else:
+                        behind += 1
+                        
         overview_data.append([
             Paragraph(f"<b>{code}</b> — {name}", table_cell_style),
-            Paragraph(str(total) if entry else "N/A", table_cell_style),
-            Paragraph(str(on_track) if entry else "N/A", table_cell_style),
-            Paragraph(str(at_risk) if entry else "N/A", table_cell_style),
-            Paragraph(str(behind) if entry else "N/A", table_cell_style),
+            Paragraph(str(total) if has_any_data else "N/A", table_cell_style),
+            Paragraph(str(on_track) if has_any_data else "N/A", table_cell_style),
+            Paragraph(str(at_risk) if has_any_data else "N/A", table_cell_style),
+            Paragraph(str(behind) if has_any_data else "N/A", table_cell_style),
         ])
         
     overview_table = Table(overview_data, colWidths=[230, 70, 70, 70, 70])
@@ -307,7 +361,6 @@ def generate_pillar_pdf(dept, month, year):
     
     # Detailed Pillar KPI Pages
     for code, name in pillars_meta:
-        entry = PillarEntry.objects.filter(department=dept, pillar=code, month=month, year=year).first()
         definitions = KPI_DEFINITIONS.get(code, [])
         
         story.append(Paragraph(f"{code} — {name}", header_style))
@@ -323,13 +376,23 @@ def generate_pillar_pdf(dept, month, year):
         ]
         
         for d in definitions:
-            db_val = KPIValue.objects.filter(pillar_entry=entry, sl_no=d['sl_no']).first() if entry else None
+            kpi_values = KPIValue.objects.filter(
+                get_date_range_q(prefix='pillar_entry__', from_month=from_month, from_year=from_year, to_month=to_month, to_year=to_year),
+                pillar_entry__department=dept,
+                pillar_entry__pillar=code,
+                sl_no=d['sl_no']
+            )
             
-            actual = db_val.actual if db_val else None
-            target = db_val.target if db_val else d['target']
-            benchmark = db_val.benchmark if db_val else d['benchmark']
-            remarks = db_val.remarks if db_val else ''
-            
+            if kpi_values.exists():
+                actual, target, benchmark = aggregate_kpi_actual(kpi_values, d['uom'], d['name'])
+                remarks_list = [v.remarks.strip() for v in kpi_values if v.remarks.strip()]
+                remarks = " | ".join(remarks_list) if remarks_list else ""
+            else:
+                actual = None
+                target = d['target']
+                benchmark = d['benchmark']
+                remarks = ''
+                
             achievement_str = "—"
             if actual is not None and target is not None:
                 ach = compute_achievement(actual, target, d['name'])

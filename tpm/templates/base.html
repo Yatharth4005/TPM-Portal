@@ -12,7 +12,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
   
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="{% static 'css/tpm.css' %}">
+  <link rel="stylesheet" href="{% static 'css/tpm.css' %}?v=2">
   
   <!-- HTMX -->
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
@@ -96,7 +96,7 @@
       {% if messages %}
         <div style="margin-bottom: 20px;">
           {% for message in messages %}
-            <div class="lock-banner" style="background-color: {% if message.tags == 'success' %}#DEF7EC{% else %}#FDE8E8{% endif %}; border-color: {% if message.tags == 'success' %}#31C48D{% else %}#F98080{% endif %}; color: {% if message.tags == 'success' %}#03543F{% else %}#9B1C1C{% endif %};">
+            <div class="lock-banner {% if message.tags == 'success' %}lock-banner-success{% else %}lock-banner-error{% endif %}">
               <span>{{ message }}</span>
             </div>
           {% endfor %}

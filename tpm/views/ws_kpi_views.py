@@ -6,6 +6,7 @@ from django.views.decorators.http import require_POST
 from django.contrib import messages
 from tpm.models import Department, Workstation, WorkstationKPI, WorkstationValue
 from tpm.utils.decorators import dept_access_required
+from tpm.utils.calculations import compute_achievement, parse_period, get_date_range_q, aggregate_ws_actual
 
 def get_months_list():
     return [
@@ -14,14 +15,37 @@ def get_months_list():
         (9, 'September'), (10, 'October'), (11, 'November'), (12, 'December')
     ]
 
+def get_months_in_range(from_month, from_year, to_month, to_year):
+    months_labels_short = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    result = []
+    m = from_month
+    y = from_year
+    while y < to_year or (y == to_year and m <= to_month):
+        result.append({
+            'month': m,
+            'year': y,
+            'label': f"{months_labels_short[m-1]} '{str(y)[-2:]}"
+        })
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    return result
+
 @dept_access_required
 def ws_kpi_page(request, dept_id):
     dept = get_object_or_404(Department, id=dept_id)
-    today = datetime.date.today()
-    month = int(request.GET.get('month', today.month))
-    year = int(request.GET.get('year', today.year))
-    tab = request.GET.get('tab', 'entry')  # 'entry' or 'analytics'
+    period = parse_period(request)
+    filter_type = period['filter_type']
+    month = period['month']
+    year = period['year']
+    from_month = period['from_month']
+    from_year = period['from_year']
+    to_month = period['to_month']
+    to_year = period['to_year']
+    period_label = period['label']
     
+    tab = request.GET.get('tab', 'entry')
     workstations = Workstation.objects.filter(department=dept).order_by('name')
     
     # Process workstations data for rendering
@@ -29,12 +53,20 @@ def ws_kpi_page(request, dept_id):
     for ws in workstations:
         kpis_data = []
         for kpi in ws.kpis.all():
-            val = WorkstationValue.objects.filter(
-                workstation_kpi=kpi, month=month, year=year
-            ).first()
-            
-            actual = val.actual if val else None
-            remarks = val.remarks if val else ''
+            if filter_type == 'range':
+                ws_values = WorkstationValue.objects.filter(
+                    get_date_range_q(from_month=from_month, from_year=from_year, to_month=to_month, to_year=to_year),
+                    workstation_kpi=kpi
+                )
+                actual = aggregate_ws_actual(ws_values, kpi.uom, kpi.kpi_name)
+                remarks_list = [v.remarks.strip() for v in ws_values if v.remarks.strip()]
+                remarks = " | ".join(remarks_list) if remarks_list else ""
+            else:
+                val = WorkstationValue.objects.filter(
+                    workstation_kpi=kpi, month=month, year=year
+                ).first()
+                actual = val.actual if val else None
+                remarks = val.remarks if val else ''
             
             achievement = None
             if actual is not None and kpi.commitment is not None:
@@ -74,9 +106,19 @@ def ws_kpi_page(request, dept_id):
             selected_ws = workstations.first()
             
         if selected_ws:
-            # Monthly actuals vs commitments trend (last 12 months)
-            months_labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+            months_labels_short = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+            if filter_type == 'range':
+                range_months = get_months_in_range(from_month, from_year, to_month, to_year)
+            else:
+                range_months = [{
+                    'month': m,
+                    'year': year,
+                    'label': months_labels_short[m-1]
+                } for m in range(1, 13)]
+
+            chart_labels = [rm['label'] for rm in range_months]
             ws_trends = {}
+            
             for kpi in selected_ws.kpis.all():
                 ws_trends[kpi.id] = {
                     'name': kpi.kpi_name,
@@ -86,9 +128,9 @@ def ws_kpi_page(request, dept_id):
                     'goodness': kpi.goodness_indicator,
                     'actuals': [],
                 }
-                for m in range(1, 13):
+                for rm in range_months:
                     val = WorkstationValue.objects.filter(
-                        workstation_kpi=kpi, month=m, year=year
+                        workstation_kpi=kpi, month=rm['month'], year=rm['year']
                     ).first()
                     ws_trends[kpi.id]['actuals'].append(val.actual if val else None)
             
@@ -96,20 +138,32 @@ def ws_kpi_page(request, dept_id):
                 'selected_ws_id': selected_ws.id,
                 'selected_ws_name': selected_ws.name,
                 'ws_trends_json': json.dumps(ws_trends),
-                'months_labels_json': json.dumps(months_labels),
+                'months_labels_json': json.dumps(chart_labels),
             }
+
+    if filter_type == 'range':
+        query_params = f"filter_type=range&from_month={from_month}&from_year={from_year}&to_month={to_month}&to_year={to_year}"
+    else:
+        query_params = f"filter_type=single&month={month}&year={year}"
 
     context = {
         'dept': dept,
+        'filter_type': filter_type,
         'month': month,
         'year': year,
+        'from_month': from_month,
+        'from_year': from_year,
+        'to_month': to_month,
+        'to_year': to_year,
+        'period_label': period_label,
+        'query_params': query_params,
         'months': get_months_list(),
-        'years': range(2025, today.year + 2),
+        'years': range(2025, datetime.date.today().year + 2),
         'workstations': workstations,
         'ws_list': ws_list,
         'tab': tab,
         'analytics_data': analytics_data,
-        'month_label': dict(get_months_list()).get(month),
+        'month_label': period_label,
     }
     return render(request, 'department/ws_kpi.html', context)
 

@@ -1,6 +1,10 @@
 {# partials/_kpi_table.html #}
 <div id="kpi-table-container">
-  {% if is_locked %}
+  {% if filter_type == 'range' %}
+    <div class="lock-banner" style="background-color: var(--jspl-light); border-color: var(--jspl-border); color: var(--jspl-navy);">
+      <span>ℹ️ You are viewing a summary of data aggregated for the period: <b>{{ period_label }}</b>. Data entry is disabled.</span>
+    </div>
+  {% elif is_locked %}
     <div class="lock-banner">
       <span>🔒 Submitted on {{ entry.submitted_at|date:"d M Y H:i" }} by {{ entry.submitted_by.get_full_name|default:entry.submitted_by.username }}</span>
       {% if request.user.is_admin %}
@@ -35,13 +39,13 @@
       </thead>
       <tbody>
         {% for row in kpi_rows %}
-          {% include "partials/_kpi_row.html" with row=row is_locked=is_locked pillar_id=pillar_id %}
+          {% include "partials/_kpi_row.html" with row=row is_locked=is_locked pillar_id=pillar_id filter_type=filter_type %}
         {% endfor %}
       </tbody>
     </table>
   </div>
 
-  {% if not is_locked %}
+  {% if filter_type != 'range' and not is_locked %}
     <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
       <button class="btn btn-primary"
               hx-post="{% url 'submit_pillar_entry' dept.id pillar_id %}?month={{ month }}&year={{ year }}"

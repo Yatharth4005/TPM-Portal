@@ -34,7 +34,7 @@
               <td>{{ row.kpi_name }}</td>
               <td class="mono" style="text-align: right;">{{ row.target|default:"—" }}</td>
               <td class="mono" style="text-align: right;">{{ row.actual|default:"—" }}</td>
-              <td class="mono" style="text-align: right; font-weight: bold; color: {% if row.achievement >= 90 %}var(--status-green){% elif row.achievement >= 75 %}var(--status-amber){% else %}var(--status-red){% endif %};">
+              <td class="mono {% if row.achievement >= 90 %}text-status-green{% elif row.achievement >= 75 %}text-status-amber{% else %}text-status-red{% endif %}" style="text-align: right; font-weight: bold;">
                 {% if row.achievement is not None %}{{ row.achievement|floatformat:1 }}%{% else %}—{% endif %}
               </td>
             </tr>
